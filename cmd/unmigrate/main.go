@@ -28,7 +28,7 @@ func main() {
 	}
 
 	// Initialize Gitea client
-	giteaClient, err := gitea.NewClient(cfg.GiteaURL, cfg.GiteaToken)
+	giteaClient, err := gitea.NewClient(cfg.GiteaURL, cfg.GiteaToken, cfg.InsecureSkipTLSVerify)
 	if err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to connect to Gitea: %v", err))
 		os.Exit(1)

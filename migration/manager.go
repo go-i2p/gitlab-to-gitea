@@ -214,57 +214,8 @@ func (m *Manager) collectRequiredUsers(projects []*gogitlab.Project) map[string]
 			addUser(member.Username)
 		}
 
-		// Collect issues and related users
-		issues, err := m.gitlabClient.GetProjectIssues(project.ID)
-		if err != nil {
-			utils.PrintWarning(fmt.Sprintf("Error collecting issues for %s: %v", project.Name, err))
-			continue
-		}
-
-		for _, issue := range issues {
-			// Add issue author
-			if issue.Author != nil {
-				addUser(issue.Author.Username)
-			}
-
-			// Add issue assignees
-			if issue.Assignee != nil {
-				addUser(issue.Assignee.Username)
-			}
-
-			for _, assignee := range issue.Assignees {
-				addUser(assignee.Username)
-			}
-
-			// Process issue notes/comments for authors
-			notes, err := m.gitlabClient.GetIssueNotes(project.ID, issue.IID)
-			if err != nil {
-				utils.PrintWarning(fmt.Sprintf("Error collecting notes for issue #%d: %v", issue.IID, err))
-				continue
-			}
-
-			for _, note := range notes {
-				if !note.System && note.Author.ID != 0 {
-					addUser(note.Author.Username)
-				}
-			}
-
-			// Extract mentioned users from issue description
-			/*for _, mention := range utils.ExtractUserMentions(issue.Description) {
-				addUser(mention)
-			}
-
-			// Extract mentioned users from notes
-			for _, note := range notes {
-				if !note.System {
-					for _, mention := range utils.ExtractUserMentions(note.Body) {
-						addUser(mention)
-					}
-				}
-			}*/
-		}
-
-		// Milestones don't have authors
+		// Issue/merge request authors are not collected here: Gitea's native
+		// GitLab importer records them as original authors on its own.
 	}
 
 	utils.PrintInfo(fmt.Sprintf("Collected a total of %d unique required users", len(required)))

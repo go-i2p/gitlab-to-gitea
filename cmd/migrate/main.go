@@ -4,6 +4,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -19,6 +20,10 @@ const (
 )
 
 func main() {
+	insecure := flag.Bool("insecure-skip-tls-verify", false,
+		"Do not verify TLS certificates of the GitLab and Gitea servers (overrides INSECURE_SKIP_TLS_VERIFY)")
+	flag.Parse()
+
 	utils.PrintHeader("---=== GitLab to Gitea migration ===---")
 	fmt.Printf("Version: %s\n\n", scriptVersion)
 
@@ -36,14 +41,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	if *insecure {
+		cfg.InsecureSkipTLSVerify = true
+	}
+	if cfg.InsecureSkipTLSVerify {
+		utils.PrintWarning("TLS certificate verification is DISABLED for GitLab and Gitea API connections.")
+		utils.PrintWarning("Gitea's own clone from GitLab is governed separately by [migrations] SKIP_TLS_VERIFY in Gitea's app.ini.")
+	}
+
 	// Initialize clients
-	gitlabClient, err := gitlab.NewClient(cfg.GitLabURL, cfg.GitLabToken)
+	gitlabClient, err := gitlab.NewClient(cfg.GitLabURL, cfg.GitLabToken, cfg.InsecureSkipTLSVerify)
 	if err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to connect to GitLab: %v", err))
 		os.Exit(1)
 	}
 
-	giteaClient, err := gitea.NewClient(cfg.GiteaURL, cfg.GiteaToken)
+	giteaClient, err := gitea.NewClient(cfg.GiteaURL, cfg.GiteaToken, cfg.InsecureSkipTLSVerify)
 	if err != nil {
 		utils.PrintError(fmt.Sprintf("Failed to connect to Gitea: %v", err))
 		os.Exit(1)

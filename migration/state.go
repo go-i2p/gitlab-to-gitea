@@ -56,6 +56,13 @@ func (s *State) Save() error {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
+	return s.saveLocked()
+}
+
+// saveLocked writes the state to disk. The caller must hold s.mutex
+// (read or write); sync.RWMutex is not reentrant, so this must never
+// acquire the lock itself.
+func (s *State) saveLocked() error {
 	utils.PrintInfo("Saving migration state...")
 
 	data, err := json.MarshalIndent(s, "", "  ")
@@ -84,8 +91,7 @@ func (s *State) Reset() error {
 	s.ImportedComments = map[string][]string{}
 
 	utils.PrintInfo("Migration state reset. Saving...")
-	s.mutex.Unlock()
-	return s.Save()
+	return s.saveLocked()
 }
 
 // HasImportedUser checks if a user has been imported

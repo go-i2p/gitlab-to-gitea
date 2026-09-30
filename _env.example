@@ -13,6 +13,11 @@ GITEA_TOKEN=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 # Migration Options
 MIGRATION_STATE_FILE=migration_state.json
 RESUME_MIGRATION=true
+# Per-repository timeout for Gitea's native GitLab migration (Go duration, default 2h)
+MIGRATION_TIMEOUT=2h
+# Skip TLS certificate verification for GitLab/Gitea API calls (self-signed certs).
+# Gitea's server-side clone from GitLab also needs [migrations] SKIP_TLS_VERIFY = true in app.ini.
+INSECURE_SKIP_TLS_VERIFY=false
 
 # Database connection for action import (optional, only needed for gitea_import_actions.py conversion)
 DB_HOST=localhost

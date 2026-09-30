@@ -15,7 +15,7 @@ Also includes:
 ## Core Functionality
 
 - Migrates users, groups, and their relationships from GitLab to Gitea
-- Transfers repositories with labels, milestones, issues, and comments
+- Transfers repositories via Gitea's native GitLab migration service, bringing over issues, merge requests, labels, milestones, releases, wiki and LFS objects
 - Preserves user relationships (collaborators) and SSH keys
 - Supports resumable migrations through state tracking
 - Handles username normalization and entity mapping between platforms
@@ -59,6 +59,20 @@ Also includes:
    GITEA_URL=https://your-gitea-instance.com
    GITEA_TOKEN=your-gitea-token
    ```
+   `GITLAB_TOKEN` is also passed to Gitea's importer, so it needs the `read_api` and `read_repository` scopes and access to every project being migrated. The Gitea instance must be able to reach `GITLAB_URL` (allow it via `[migrations] ALLOWED_DOMAINS` / `ALLOW_LOCALNETWORKS` if needed). Large projects can take a while; tune `MIGRATION_TIMEOUT` (default `2h`).
+
+### Self-signed or otherwise invalid TLS certificates
+
+TLS certificates are verified by default. To skip verification:
+
+- For this tool's own API calls to GitLab and Gitea, set `INSECURE_SKIP_TLS_VERIFY=true` or pass `-insecure-skip-tls-verify` to the migrate command.
+- For the repository import itself, Gitea connects to GitLab directly, so this tool's setting does not apply. Set it in Gitea's `app.ini` and restart Gitea:
+  ```ini
+  [migrations]
+  SKIP_TLS_VERIFY = true
+  ```
+
+Only use these against servers you trust. They make the connections open to man-in-the-middle attacks.
 
 ## Usage
 
@@ -71,7 +85,7 @@ Execute the migration tool after configuration:
 The tool will:
 1. Connect to both GitLab and Gitea instances
 2. Migrate users and groups first
-3. Migrate projects with all associated data
+3. Migrate each project with Gitea's native GitLab importer (`POST /repos/migrate` with `service: "gitlab"`), then map project members to collaborators
 4. Track progress in `migration_state.json` (resumable if interrupted)
 
 ## Key Dependencies

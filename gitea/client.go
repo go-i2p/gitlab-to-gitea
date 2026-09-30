@@ -5,6 +5,7 @@ package gitea
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,7 +68,9 @@ func (c *Client) FetchCSRFToken() (string, error) {
 	return "", fmt.Errorf("could not find CSRF token in login page")
 }
 
-func NewClient(baseURL, token string) (*Client, error) {
+// NewClient creates a Gitea API client. When insecureSkipTLSVerify is true,
+// TLS certificates presented by the Gitea server are not verified.
+func NewClient(baseURL, token string, insecureSkipTLSVerify bool) (*Client, error) {
 	// Remove trailing slash from baseURL if present
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
@@ -82,10 +85,25 @@ func NewClient(baseURL, token string) (*Client, error) {
 			Timeout: 360 * time.Second,
 			Transport: &http.Transport{
 				Dial: Dial,
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: insecureSkipTLSVerify, //nolint:gosec // opt-in via config
+				},
 			},
 		},
 		token: token,
 	}, nil
+}
+
+// WithTimeout returns a copy of the client whose requests use the given
+// timeout. A zero timeout disables the timeout entirely.
+func (c *Client) WithTimeout(timeout time.Duration) *Client {
+	httpClient := *c.httpClient
+	httpClient.Timeout = timeout
+	return &Client{
+		baseURL:    c.baseURL,
+		httpClient: &httpClient,
+		token:      c.token,
+	}
 }
 
 // Add a custom transport to handle CSRF tokens

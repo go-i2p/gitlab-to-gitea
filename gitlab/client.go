@@ -4,7 +4,9 @@
 package gitlab
 
 import (
+	"crypto/tls"
 	"fmt"
+	"net/http"
 
 	"github.com/xanzy/go-gitlab"
 )
@@ -14,9 +16,20 @@ type Client struct {
 	client *gitlab.Client
 }
 
-// NewClient creates a new GitLab client with the provided URL and token
-func NewClient(url, token string) (*Client, error) {
-	client, err := gitlab.NewClient(token, gitlab.WithBaseURL(url))
+// NewClient creates a new GitLab client with the provided URL and token.
+// When insecureSkipTLSVerify is true, TLS certificates presented by the
+// GitLab server are not verified.
+func NewClient(url, token string, insecureSkipTLSVerify bool) (*Client, error) {
+	opts := []gitlab.ClientOptionFunc{gitlab.WithBaseURL(url)}
+	if insecureSkipTLSVerify {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // opt-in via config
+		}
+		opts = append(opts, gitlab.WithHTTPClient(&http.Client{Transport: transport}))
+	}
+
+	client, err := gitlab.NewClient(token, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GitLab client: %w", err)
 	}

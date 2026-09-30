@@ -11,20 +11,31 @@ import (
 	"github.com/go-i2p/gitlab-to-gitea/utils"
 )
 
-// repositoryMigrateRequest represents the data needed to migrate a repository to Gitea
+// repositoryMigrateRequest is the payload for Gitea's POST /repos/migrate
+// endpoint. With Service set to "gitlab", Gitea uses its native GitLab
+// importer, which pulls the git data together with issues, merge requests,
+// labels, milestones, releases, wiki and LFS objects.
 type repositoryMigrateRequest struct {
-	AuthPassword string `json:"auth_password"`
-	AuthUsername string `json:"auth_username"`
-	CloneAddr    string `json:"clone_addr"`
-	Description  string `json:"description"`
-	Mirror       bool   `json:"mirror"`
-	Private      bool   `json:"private"`
-	RepoName     string `json:"repo_name"`
-	UID          int    `json:"uid"`
+	CloneAddr   string `json:"clone_addr"`
+	Service     string `json:"service"`
+	AuthToken   string `json:"auth_token,omitempty"`
+	RepoOwner   string `json:"repo_owner"`
+	RepoName    string `json:"repo_name"`
+	Description string `json:"description"`
+	Private     bool   `json:"private"`
+	Mirror      bool   `json:"mirror"`
+
+	Issues       bool `json:"issues"`
+	Labels       bool `json:"labels"`
+	Milestones   bool `json:"milestones"`
+	PullRequests bool `json:"pull_requests"`
+	Releases     bool `json:"releases"`
+	Wiki         bool `json:"wiki"`
+	LFS          bool `json:"lfs"`
 }
 
-// ImportProject imports a GitLab project to Gitea
-// ImportProject imports a GitLab project to Gitea
+// ImportProject imports a GitLab project to Gitea using Gitea's native
+// GitLab migration service, then maps project members to collaborators.
 func (m *Manager) ImportProject(project *gitlab.Project) error {
 	cleanName := utils.CleanName(project.Name)
 
@@ -48,32 +59,31 @@ func (m *Manager) ImportProject(project *gitlab.Project) error {
 	if exists, err := m.repoExists(owner, cleanName); err != nil {
 		return fmt.Errorf("failed to check if repository exists: %w", err)
 	} else if exists {
-		utils.PrintWarning(fmt.Sprintf("Project %s already exists in Gitea, skipping repository creation!", cleanName))
+		utils.PrintWarning(fmt.Sprintf("Project %s already exists in Gitea, skipping repository migration!", cleanName))
 	} else {
-		// Prepare clone URL
-		cloneURL := project.HTTPURLToRepo
-		if m.config.GitLabAdminUser == "" && m.config.GitLabAdminPass == "" {
-			cloneURL = project.SSHURLToRepo
-		}
-
-		// Determine visibility
-		private := project.Visibility == "private" || project.Visibility == "internal"
-
-		// Create migration request
 		migrateReq := repositoryMigrateRequest{
-			AuthPassword: m.config.GitLabAdminPass,
-			AuthUsername: m.config.GitLabAdminUser,
-			CloneAddr:    cloneURL,
-			Description:  project.Description,
-			Mirror:       false,
-			Private:      private,
-			RepoName:     cleanName,
-			UID:          int(ownerInfo["id"].(float64)),
+			CloneAddr:   project.HTTPURLToRepo,
+			Service:     "gitlab",
+			AuthToken:   m.config.GitLabToken,
+			RepoOwner:   owner,
+			RepoName:    cleanName,
+			Description: project.Description,
+			Private:     project.Visibility == "private" || project.Visibility == "internal",
+			Mirror:      false,
+
+			Issues:       true,
+			Labels:       true,
+			Milestones:   true,
+			PullRequests: true,
+			Releases:     true,
+			Wiki:         true,
+			LFS:          true,
 		}
 
-		// Call Gitea API to migrate repository
+		// The native migration runs synchronously and can take a long time
+		// for large projects, so use a client with an extended timeout.
 		var result map[string]interface{}
-		err = m.giteaClient.Post("/repos/migrate", migrateReq, &result)
+		err = m.giteaClient.WithTimeout(m.config.MigrationTimeout).Post("/repos/migrate", migrateReq, &result)
 		if err != nil {
 			return fmt.Errorf("failed to migrate repository %s: %w", cleanName, err)
 		}
@@ -81,7 +91,8 @@ func (m *Manager) ImportProject(project *gitlab.Project) error {
 		utils.PrintInfo(fmt.Sprintf("Project %s imported!", cleanName))
 	}
 
-	// Process collaborators
+	// Gitea's migrator does not carry over project members, so map them to
+	// collaborators ourselves.
 	collaborators, err := m.gitlabClient.GetProjectMembers(project.ID)
 	if err != nil {
 		utils.PrintWarning(fmt.Sprintf("Error fetching collaborators for project %s: %v", project.Name, err))
@@ -89,43 +100,6 @@ func (m *Manager) ImportProject(project *gitlab.Project) error {
 		utils.PrintInfo(fmt.Sprintf("Found %d collaborators for project %s", len(collaborators), cleanName))
 		if err := m.importProjectCollaborators(collaborators, project); err != nil {
 			utils.PrintWarning(fmt.Sprintf("Error importing collaborators: %v", err))
-		}
-	}
-
-	// Process labels
-	labels, err := m.gitlabClient.GetProjectLabels(project.ID)
-	if err != nil {
-		utils.PrintWarning(fmt.Sprintf("Error fetching labels for project %s: %v", project.Name, err))
-	} else {
-		utils.PrintInfo(fmt.Sprintf("Found %d labels for project %s", len(labels), cleanName))
-		if err := m.importProjectLabels(labels, owner, cleanName); err != nil {
-			utils.PrintWarning(fmt.Sprintf("Error importing labels: %v", err))
-		}
-	}
-
-	// Process milestones
-	milestones, err := m.gitlabClient.GetProjectMilestones(project.ID)
-	if err != nil {
-		utils.PrintWarning(fmt.Sprintf("Error fetching milestones for project %s: %v", project.Name, err))
-	} else {
-		utils.PrintInfo(fmt.Sprintf("Found %d milestones for project %s", len(milestones), cleanName))
-		if err := m.importProjectMilestones(milestones, owner, cleanName); err != nil {
-			utils.PrintWarning(fmt.Sprintf("Error importing milestones: %v", err))
-		}
-	}
-
-	// Process issues
-	issues, err := m.gitlabClient.GetProjectIssues(project.ID)
-	if err != nil {
-		utils.PrintWarning(fmt.Sprintf("Error fetching issues for project %s: %v", project.Name, err))
-	} else {
-		utils.PrintInfo(fmt.Sprintf("Found %d issues for project %s", len(issues), cleanName))
-
-		// Ensure all mentioned users exist in Gitea
-		m.ensureMentionedUsersExist(issues)
-
-		if err := m.importProjectIssues(issues, owner, cleanName, project.ID); err != nil {
-			utils.PrintWarning(fmt.Sprintf("Error importing issues: %v", err))
 		}
 	}
 
